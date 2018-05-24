@@ -1,19 +1,30 @@
 package com.benovskyi.bohdan;
 
 import static jcuda.driver.JCudaDriver.cuCtxCreate;
+import static jcuda.driver.JCudaDriver.cuCtxSynchronize;
 import static jcuda.driver.JCudaDriver.cuDeviceGet;
 import static jcuda.driver.JCudaDriver.cuInit;
+import static jcuda.driver.JCudaDriver.cuLaunchKernel;
+import static jcuda.driver.JCudaDriver.cuMemAlloc;
+import static jcuda.driver.JCudaDriver.cuMemFree;
+import static jcuda.driver.JCudaDriver.cuMemcpyDtoH;
+import static jcuda.driver.JCudaDriver.cuMemcpyHtoD;
 import static jcuda.driver.JCudaDriver.cuModuleGetFunction;
 import static jcuda.driver.JCudaDriver.cuModuleLoad;
 
+import java.io.BufferedReader;
 import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.InputStreamReader;
 import java.util.Random;
 
+import jcuda.Pointer;
+import jcuda.Sizeof;
 import jcuda.driver.CUcontext;
 import jcuda.driver.CUdevice;
+import jcuda.driver.CUdeviceptr;
 import jcuda.driver.CUfunction;
 import jcuda.driver.CUmodule;
 import jcuda.driver.JCudaDriver;
@@ -21,6 +32,10 @@ import jcuda.driver.JCudaDriver;
 public class Runner {
 
 	public static void main(String[] args) throws IOException {
+		BufferedReader br = new BufferedReader(new InputStreamReader(System.in));
+		System.out.print("Please enter size of matrix: ");
+		int N = Integer.parseInt(br.readLine());
+		
 		// Enable exceptions and omit all subsequent error checks
         JCudaDriver.setExceptionsEnabled(true);
         
@@ -41,40 +56,84 @@ public class Runner {
         CUfunction function = new CUfunction();
         cuModuleGetFunction(function, module, "matrixAdd");
         
-        int h_a[][] = new int[5][5];
-        int h_b[][] = new int[5][5];
-        int h_c[][] = new int[5][5];
         
-        int size = 5*5;
+        int h_a[] = new int[N*N];
+        int h_b[] = new int[N*N];
+        int h_c[] = new int[N*N];
+        
         Random rand = new Random();
         
-        for(int i = 0; i < 5; i++)
+        for(int i = 0; i < N*N; i++)
         {
-            for(int j = 0; j < 5; j++) {
-            	h_a[i][j] = rand.nextInt(10);
-            	h_b[i][j] = rand.nextInt(10);
-            }
+            	h_a[i] = rand.nextInt(10);
+            	h_b[i] = rand.nextInt(10);
         }
         
         System.out.println("Matrix A --->");
-        for(int i = 0; i < 5; i++)
+        for(int i = 0; i < N*N; i++)
         {
-            for(int j = 0; j < 5; j++) {
-            	System.out.print(h_a[i][j] + "\t");
-            }
-            System.out.println();
+            if(i % N == 0 && i != 0)
+            	System.out.println();
+            System.out.print(h_a[i] + "\t");
         }
+        System.out.println();
         
         System.out.println("Matrix B --->");
-        for(int i = 0; i < 5; i++)
+        for(int i = 0; i < N*N; i++)
         {
-            for(int j = 0; j < 5; j++) {
-            	System.out.print(h_b[i][j] + "\t");
-            }
-            System.out.println();
+            if(i % N == 0 && i != 0)
+            	System.out.println();
+            System.out.print(h_b[i] + "\t");
+        }
+        System.out.println();
+        
+        CUdeviceptr deviceInputA = new CUdeviceptr();
+        cuMemAlloc(deviceInputA, N * N * Sizeof.INT);
+        cuMemcpyHtoD(deviceInputA, Pointer.to(h_a), N * N * Sizeof.INT);
+        
+        CUdeviceptr deviceInputB = new CUdeviceptr();
+        cuMemAlloc(deviceInputB, N * N * Sizeof.INT);
+        cuMemcpyHtoD(deviceInputB, Pointer.to(h_b), N * N * Sizeof.INT);
+        
+        // Allocate device output memory
+        CUdeviceptr deviceOutput = new CUdeviceptr();
+        cuMemAlloc(deviceOutput, N * N * Sizeof.INT);
+        
+        // Set up the kernel parameters
+        Pointer kernelParameters = Pointer.to(
+            Pointer.to(new int[]{N}),
+            Pointer.to(deviceInputA),
+            Pointer.to(deviceInputB),
+            Pointer.to(deviceOutput)
+        );
+        
+        // Call the kernel function.
+        int blockSizeX = 256;
+        int gridSizeX = (int)Math.ceil((double)N / blockSizeX);
+        cuLaunchKernel(function,
+            gridSizeX,  1, 1,      // Grid dimension
+            blockSizeX, 1, 1,      // Block dimension
+            0, null,               // Shared memory size and stream
+            kernelParameters, null // Kernel- and extra parameters
+        );
+        cuCtxSynchronize();
+        
+        // Allocate host output memory and copy the device output
+        // to the host.
+        cuMemcpyDtoH(Pointer.to(h_c), deviceOutput, N * N * Sizeof.INT);
+        
+        System.out.println("RESULT --->");
+        for(int i = 0; i < N * N; i++)
+        {
+        	if(i % N == 0 && i != 0)
+            	System.out.println();
+            System.out.print(h_c[i] + "\t");
         }
         
-        
+        // Clean up.
+        cuMemFree(deviceInputA);
+        cuMemFree(deviceInputB);
+        cuMemFree(deviceOutput);
 
 	}
 	
